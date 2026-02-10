@@ -20,6 +20,25 @@ from alt_text_generator import AltTextGenerator
 from progress_tracker import ProgressTracker
 
 
+def is_valid_alt_text(alt_text: str) -> bool:
+    """
+    Check if alt text is valid (not a skip/error message).
+
+    Args:
+        alt_text: The alt text to check
+
+    Returns:
+        True if valid, False if it should be excluded
+    """
+    if pd.isna(alt_text) or alt_text == '':
+        return False
+
+    alt_lower = str(alt_text).lower()
+    # Exclude images with skip messages or size issues
+    exclude_patterns = ['skip', 'too small']
+    return not any(pattern in alt_lower for pattern in exclude_patterns)
+
+
 class SimplifiedCSVWriter:
     """Writes simplified CSV (image URL and alt text) line-by-line as backup."""
 
@@ -46,14 +65,17 @@ class SimplifiedCSVWriter:
     def write_row(self, image_url: str, alt_text: str):
         """
         Write a row immediately (for backup).
+        Skips images with skip messages or size issues.
 
         Args:
             image_url: The image URL
             alt_text: The generated alt text
         """
         if self.writer and image_url not in self.written_urls:
-            self.writer.writerow([image_url, alt_text])
-            self.file.flush()  # Flush immediately to disk
+            # Only write if alt text is valid (not a skip message)
+            if is_valid_alt_text(alt_text):
+                self.writer.writerow([image_url, alt_text])
+                self.file.flush()  # Flush immediately to disk
             self.written_urls.add(image_url)
 
     def close(self):
@@ -119,6 +141,7 @@ def load_instructions(instructions_path: str) -> str:
 def generate_simplified_csv(csv_handler: CSVHandler, output_path: str):
     """
     Generate a simplified CSV with only unique image URLs and their ALT text.
+    Excludes images with skip messages or size issues.
 
     Args:
         csv_handler: CSV handler instance
@@ -129,6 +152,9 @@ def generate_simplified_csv(csv_handler: CSVHandler, output_path: str):
     # Get all rows with ALT text
     df = csv_handler.df
     df_with_alt = df[df['ALT text'].notna() & (df['ALT text'] != '')]
+
+    # Filter out skipped/excluded images
+    df_with_alt = df_with_alt[df_with_alt['ALT text'].apply(is_valid_alt_text)]
 
     # Create simplified dataframe with unique images
     simplified_df = df_with_alt[['Destination', 'ALT text']].drop_duplicates(subset=['Destination'])
@@ -146,6 +172,7 @@ def generate_simplified_csv(csv_handler: CSVHandler, output_path: str):
 def generate_filename_csv(csv_handler: CSVHandler, output_path: str):
     """
     Generate a CSV with only image filenames (not full URLs) and their ALT text.
+    Excludes images with skip messages or size issues.
 
     Args:
         csv_handler: CSV handler instance
@@ -156,6 +183,9 @@ def generate_filename_csv(csv_handler: CSVHandler, output_path: str):
     # Get all rows with ALT text
     df = csv_handler.df
     df_with_alt = df[df['ALT text'].notna() & (df['ALT text'] != '')]
+
+    # Filter out skipped/excluded images
+    df_with_alt = df_with_alt[df_with_alt['ALT text'].apply(is_valid_alt_text)]
 
     # Extract filename from URL
     df_with_alt = df_with_alt.copy()
