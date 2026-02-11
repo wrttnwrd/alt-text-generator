@@ -1,0 +1,28 @@
+# Example YAML configuration for CSV processing
+# Place this file in the same directory as your CSV with the same name
+# For example: iowa.yaml for iowa.csv
+
+# Custom instructions (inline markdown text)
+# These instructions will be sent to Claude along with the images
+instructions: |
+  You are generating image alt text for images on a wedding publication website.
+
+  Guidelines:
+  - Keep alt text between 125-150 characters
+  - Don't name flower types specifically, use "blooms" or "floral arrangements"
+  - Focus on describing the scene and emotions
+  - Skip images smaller than 600px in width or height
+  - Be descriptive but concise
+
+# Maximum cost limit in USD (optional)
+# Processing will stop if estimated cost exceeds this amount
+# max_cost: 5.0
+
+# Delay in seconds between page scrapes (optional)
+# Useful to avoid rate limiting when scraping many pages
+# scrape_delay: 1.0
+
+# Restart mode (optional, default: false)
+# Set to true to clear existing alt text and start fresh
+# WARNING: This will delete all existing alt text!
+# restart: false

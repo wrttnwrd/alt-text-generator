@@ -5,6 +5,12 @@
 # Files folder (contains CSVs and instructions)
 files/
 
+# Watched folder (user uploads)
+watched/
+
+# Output folder (generated results)
+output/
+
 # Python
 __pycache__/
 *.py[cod]

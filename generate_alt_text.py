@@ -34,8 +34,8 @@ def is_valid_alt_text(alt_text: str) -> bool:
         return False
 
     alt_lower = str(alt_text).lower()
-    # Exclude images with skip messages or size issues
-    exclude_patterns = ['skip', 'too small']
+    # Exclude images with skip messages, size issues, or errors
+    exclude_patterns = ['skip', 'too small', 'download error', 'error:', 'icon', 'thumbnail']
     return not any(pattern in alt_lower for pattern in exclude_patterns)
 
 
@@ -610,6 +610,15 @@ def process_images(
             print(f"⚏ Image variant in batch (will copy after processing): {image_url}")
             continue
 
+        # Skip SVG files (icons)
+        if image_url.lower().endswith('.svg'):
+            skip_msg = "Skipped: SVG icon"
+            csv_handler.update_row(idx, **{'ALT text': skip_msg})
+            progress.update(skipped=1, last_index=idx)
+            processed_images[image_url] = None
+            print(f"⊘ Skipped (SVG icon): {image_url}")
+            continue
+
         # Check file size from CSV (if Size (Bytes) column exists)
         MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
 
@@ -658,6 +667,16 @@ def process_images(
                 csv_handler.update_row(idx, message=f"Image too large: {dimensions[0]}x{dimensions[1]}px (max 8000x8000)")
             progress.update(skipped=1, last_index=idx)
             processed_images[image_url] = None  # Mark as failed
+            continue
+
+        # Skip small images (likely icons)
+        width, height = dimensions
+        if width < 100 or height < 100:
+            skip_msg = f"Skipped: Icon/thumbnail ({width}x{height}px, minimum 100x100)"
+            csv_handler.update_row(idx, **{'ALT text': skip_msg})
+            progress.update(skipped=1, last_index=idx)
+            processed_images[image_url] = None
+            print(f"⊘ Skipped (too small): {image_url} ({width}x{height}px)")
             continue
 
         if local_path is None:

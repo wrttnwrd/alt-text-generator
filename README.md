@@ -17,6 +17,63 @@ Generate quality, relevant alt text for images found in a ScreamingFrog site cra
 - **Custom Instructions**: Support for site-specific instructions via markdown file
 - **Rate Limiting**: Configurable delays between page scrapes to avoid 403 errors
 
+## Two Ways to Use
+
+### 1. Streamlit Web Interface (NEW!)
+
+The easiest way to use Alt Text Generator is through the web interface:
+
+1. Start the Streamlit app:
+```bash
+pipenv run streamlit run streamlit_app.py
+```
+
+2. Drag and drop CSV files (and optional YAML config files) into the browser window
+
+3. The app will automatically:
+   - Queue files for processing
+   - Process them one at a time
+   - Show real-time progress and status
+   - Display errors and skipped images
+   - Show costs after completion
+   - Save results to the `output/` folder
+   - Clean up processed files from the `watched/` folder
+
+**Features:**
+- Drag-and-drop file upload
+- Automatic file watching (you can also drop files directly into the `watched/` folder)
+- Real-time processing status
+- Error and skip logs
+- Post-processing statistics (cost, processed, skipped, failed)
+- Queue management (processes files one at a time)
+
+**YAML Configuration:**
+Place a YAML file with the same name as your CSV (e.g., `iowa.yaml` for `iowa.csv`) to configure processing:
+
+```yaml
+# Custom instructions (inline markdown)
+instructions: |
+  Keep alt text between 125-150 characters.
+  Focus on describing the scene and emotions.
+
+# Optional settings
+max_cost: 5.0          # Stop if cost exceeds $5
+scrape_delay: 1.0      # Wait 1 second between page scrapes
+restart: false         # Clear existing alt text
+```
+
+See `example-config.yaml` for a complete example.
+
+### 2. Command-Line Interface (Original)
+
+For automation and scripting, use the command-line interface:
+
+```bash
+pipenv run python generate_alt_text.py path/to/your/file.csv [OPTIONS]
+```
+
+See [CLI Usage](#cli-usage) section below for full details.
+
 ## Requirements
 
 - Python 3.8 or higher
@@ -42,7 +99,7 @@ pipenv install
 ANTHROPIC_API_KEY=your_api_key_here
 ```
 
-## Usage
+## CLI Usage
 
 ### Basic Usage
 
@@ -208,18 +265,26 @@ Current pricing (claude-sonnet-4-5-20250929):
 
 ```
 alt-text-generator/
-├── generate_alt_text.py      # Main script
+├── streamlit_app.py           # Streamlit web interface (NEW!)
+├── generate_alt_text.py       # CLI script
+├── processor.py               # Core processing logic (NEW!)
+├── processing_queue.py        # Queue management (NEW!)
+├── file_watcher.py            # Directory monitoring (NEW!)
+├── config_handler.py          # YAML config support (NEW!)
 ├── csv_handler.py             # CSV operations
 ├── web_scraper.py             # Page scraping
 ├── image_handler.py           # Image downloading
 ├── alt_text_generator.py      # Claude API integration
 ├── progress_tracker.py        # Progress tracking
+├── example-config.yaml        # Example YAML configuration (NEW!)
 ├── Pipfile                    # Python dependencies
 ├── Pipfile.lock              # Locked dependencies (auto-generated)
 ├── requirements.txt           # Python dependencies (alternative)
-├── .env.example              # Environment variables template
+├── .env                       # Environment variables (your API key)
 ├── .gitignore                # Git ignore rules
-└── files/                    # Your CSV and instructions files
+├── watched/                  # Drop CSV files here for auto-processing (NEW!)
+├── output/                   # Generated output files (NEW!)
+└── files/                    # Legacy folder for CLI usage
     ├── your-data.csv
     └── instructions.md
 ```
