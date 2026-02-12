@@ -35,7 +35,7 @@ def is_valid_alt_text(alt_text: str) -> bool:
 
     alt_lower = str(alt_text).lower()
     # Exclude images with skip messages, size issues, or errors
-    exclude_patterns = ['skip', 'too small', 'download error', 'error:', 'icon', 'thumbnail']
+    exclude_patterns = ['skip', 'too small', 'download error', 'error:', 'icon', 'thumbnail', 'avatar']
     return not any(pattern in alt_lower for pattern in exclude_patterns)
 
 
@@ -242,6 +242,16 @@ def process_csv_file(
             # Skip SVG files (icons)
             if image_url.lower().endswith('.svg'):
                 skip_msg = "Skipped: SVG icon"
+                csv_handler.update_row(idx, **{'ALT text': skip_msg})
+                results.total_skipped += 1
+                results.skipped_images.append({'url': image_url, 'reason': skip_msg})
+                if progress_callback:
+                    progress_callback('image_skipped', {'url': image_url, 'reason': skip_msg})
+                continue
+
+            # Skip googleusercontent images (avatars)
+            if 'googleusercontent' in image_url.lower():
+                skip_msg = "Skipped: Avatar (googleusercontent)"
                 csv_handler.update_row(idx, **{'ALT text': skip_msg})
                 results.total_skipped += 1
                 results.skipped_images.append({'url': image_url, 'reason': skip_msg})

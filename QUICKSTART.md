@@ -15,13 +15,13 @@ pipenv install
 
 ## Step 2: Set Up API Key
 
-Create a `.env` file in the project root:
+Create a `.env` file from the example:
 
 ```bash
-echo "ANTHROPIC_API_KEY=your_api_key_here" > .env
+cp .env.example .env
 ```
 
-Replace `your_api_key_here` with your actual Anthropic API key.
+Then edit `.env` and replace `your_api_key_here` with your actual Anthropic API key from https://console.anthropic.com/settings/keys
 
 ## Step 3: Launch the App
 

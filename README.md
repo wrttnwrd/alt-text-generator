@@ -95,9 +95,11 @@ pipenv install
 ```
 
 4. Create a `.env` file in the project root with your Anthropic API key:
+```bash
+cp .env.example .env
 ```
-ANTHROPIC_API_KEY=your_api_key_here
-```
+
+Then edit `.env` and replace `your_api_key_here` with your actual Anthropic API key from https://console.anthropic.com/settings/keys
 
 ## CLI Usage
 

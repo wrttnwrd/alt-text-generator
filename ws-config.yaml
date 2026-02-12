@@ -15,15 +15,3 @@ instructions: |
   - Be descriptive but concise
   - Ignore images hosted on ytimage.com or googleusercontent.com
 
-# Maximum cost limit in USD (optional)
-# Processing will stop if estimated cost exceeds this amount
-# max_cost: 5.0
-
-# Delay in seconds between page scrapes (optional)
-# Useful to avoid rate limiting when scraping many pages
-# scrape_delay: 1.0
-
-# Restart mode (optional, default: false)
-# Set to true to clear existing alt text and start fresh
-# WARNING: This will delete all existing alt text!
-# restart: false

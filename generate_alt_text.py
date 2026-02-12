@@ -619,6 +619,15 @@ def process_images(
             print(f"⊘ Skipped (SVG icon): {image_url}")
             continue
 
+        # Skip googleusercontent images (avatars)
+        if 'googleusercontent' in image_url.lower():
+            skip_msg = "Skipped: Avatar (googleusercontent)"
+            csv_handler.update_row(idx, **{'ALT text': skip_msg})
+            progress.update(skipped=1, last_index=idx)
+            processed_images[image_url] = None
+            print(f"⊘ Skipped (Avatar): {image_url}")
+            continue
+
         # Check file size from CSV (if Size (Bytes) column exists)
         MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
 

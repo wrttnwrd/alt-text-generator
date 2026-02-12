@@ -62,7 +62,14 @@ def process_next_job():
 
     # Create placeholders for status updates
     status_container = st.empty()
-    progress_bar = st.progress(0)
+    progress_container = st.empty()
+    progress_text = st.empty()
+
+    # Initialize progress tracking
+    if 'progress_total' not in st.session_state:
+        st.session_state.progress_total = 0
+    if 'progress_current' not in st.session_state:
+        st.session_state.progress_current = 0
 
     try:
         # Load configuration
@@ -73,8 +80,19 @@ def process_next_job():
         # Progress callback
         def on_progress(event_type: str, data: dict):
             if event_type == 'image_processed':
-                pass  # Could update progress bar here
+                st.session_state.progress_current += 1
+                # Update progress bar
+                if st.session_state.progress_total > 0:
+                    progress = st.session_state.progress_current / st.session_state.progress_total
+                    progress_container.progress(progress)
+                    progress_text.text(f"Processing: {st.session_state.progress_current}/{st.session_state.progress_total} images")
             elif event_type == 'image_skipped':
+                st.session_state.progress_current += 1
+                # Update progress bar
+                if st.session_state.progress_total > 0:
+                    progress = st.session_state.progress_current / st.session_state.progress_total
+                    progress_container.progress(progress)
+                    progress_text.text(f"Processing: {st.session_state.progress_current}/{st.session_state.progress_total} images")
                 st.session_state.skipped_log.append({
                     'job': job.csv_path.name,
                     'url': data['url'],
@@ -82,17 +100,39 @@ def process_next_job():
                     'timestamp': datetime.now()
                 })
             elif event_type == 'image_failed':
+                st.session_state.progress_current += 1
+                # Update progress bar
+                if st.session_state.progress_total > 0:
+                    progress = st.session_state.progress_current / st.session_state.progress_total
+                    progress_container.progress(progress)
+                    progress_text.text(f"Processing: {st.session_state.progress_current}/{st.session_state.progress_total} images")
                 st.session_state.error_log.append({
                     'job': job.csv_path.name,
                     'url': data['url'],
                     'error': data['error'],
                     'timestamp': datetime.now()
                 })
+            elif event_type == 'batch_complete':
+                # Update overall counts
+                pass
 
         # Status callback
         def on_status(msg: str):
             st.session_state.current_status = msg
             status_container.info(f"**{job.csv_path.name}:** {msg}")
+
+            # Extract total count from status message if available
+            if "Processing" in msg and "images" in msg:
+                try:
+                    import re
+                    match = re.search(r'Processing (\d+) images', msg)
+                    if match:
+                        st.session_state.progress_total = int(match.group(1))
+                        st.session_state.progress_current = 0
+                        progress_container.progress(0.0)
+                        progress_text.text(f"Processing: 0/{st.session_state.progress_total} images")
+                except:
+                    pass
 
         # Process the file
         results = process_csv_file(
@@ -113,7 +153,8 @@ def process_next_job():
         })
 
         status_container.success(f"✓ Completed: {job.csv_path.name}")
-        progress_bar.progress(1.0)
+        progress_container.progress(1.0)
+        progress_text.text(f"Completed: {st.session_state.progress_total}/{st.session_state.progress_total} images")
 
     except Exception as e:
         # Mark as failed
@@ -143,8 +184,10 @@ def main():
     # Initialize session state
     initialize_session_state()
 
-    # Scan for new files on each run
-    scan_for_new_files()
+    # Only scan for new files if we're not currently processing
+    # This prevents interrupting ongoing jobs
+    if not st.session_state.processing:
+        scan_for_new_files()
 
     # Header
     st.title("🖼️ Alt Text Generator")
@@ -167,6 +210,8 @@ def main():
                 f.write(uploaded_file.getbuffer())
 
         st.success(f"✓ Uploaded {len(uploaded_files)} file(s) to watched folder")
+        # Scan for the newly uploaded files
+        scan_for_new_files()
         time.sleep(1)
         st.rerun()
 
@@ -186,12 +231,14 @@ def main():
     # Process next job if not currently processing
     current_job = queue.get_current_job()
 
-    if not current_job and not st.session_state.processing:
-        # Check for next job
-        next_job = queue.get_next_job()
-        if next_job:
-            process_next_job()
-            st.rerun()
+    # Only start processing if we're not already processing
+    if not st.session_state.processing:
+        if not current_job:
+            # Check for next job
+            next_job = queue.get_next_job()
+            if next_job:
+                process_next_job()
+                # Don't call st.rerun() here - let the auto-refresh handle it
 
     # Current processing job
     if current_job:
