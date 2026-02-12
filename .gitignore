@@ -2,6 +2,10 @@
 .env
 *.env
 
+# Pipfiles
+Pipfile
+*.lock
+
 # Files folder (contains CSVs and instructions)
 files/
 
