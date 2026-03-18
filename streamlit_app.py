@@ -4,20 +4,49 @@ Streamlit app for alt text generation with file watching and queue management.
 Run with: streamlit run streamlit_app.py
 """
 
+import os
 import streamlit as st
 import time
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
+from dotenv import load_dotenv
 
 from processing_queue import ProcessingQueue, ProcessingStatus, ProcessingJob
 from config_handler import ProcessingConfig
 from processor import process_csv_file
+from csv_handler import CSVHandler
+from alt_text_generator import AltTextGenerator
 
 
 # Configuration
 WATCHED_DIR = Path("watched")
 OUTPUT_DIR = Path("output")
+
+
+def check_api_key() -> bool:
+    """Check if the Anthropic API key is configured."""
+    load_dotenv()
+    key = os.getenv('ANTHROPIC_API_KEY')
+    return bool(key and key.strip() and key != 'your_api_key_here')
+
+
+def estimate_job_cost(csv_path: Path) -> tuple:
+    """
+    Estimate cost for a CSV file by counting rows to process.
+
+    Returns:
+        Tuple of (num_images, estimated_cost)
+    """
+    try:
+        handler = CSVHandler(str(csv_path))
+        df = handler.load()
+        rows = handler.get_rows_to_process()
+        num_images = len(rows)
+        cost = AltTextGenerator.estimate_cost(num_images)
+        return num_images, cost
+    except Exception:
+        return 0, 0.0
 
 
 def initialize_session_state():
@@ -38,6 +67,9 @@ def initialize_session_state():
 
     if 'processing' not in st.session_state:
         st.session_state.processing = False
+
+    if 'confirmed_jobs' not in st.session_state:
+        st.session_state.confirmed_jobs = set()
 
 
 def scan_for_new_files():
@@ -72,8 +104,20 @@ def process_next_job():
         st.session_state.progress_current = 0
 
     try:
-        # Load configuration
+        # Load configuration - merge YAML config with sidebar settings
         config = ProcessingConfig.from_csv_path(job.csv_path)
+
+        # Override with sidebar settings if provided
+        sidebar_instructions = st.session_state.get('sidebar_instructions', '').strip()
+        sidebar_max_cost = st.session_state.get('sidebar_max_cost', 0.0)
+        sidebar_scrape_delay = st.session_state.get('sidebar_scrape_delay', 0.0)
+
+        if sidebar_instructions:
+            config.instructions = sidebar_instructions
+        if sidebar_max_cost > 0:
+            config.max_cost = sidebar_max_cost
+        if sidebar_scrape_delay > 0:
+            config.scrape_delay = sidebar_scrape_delay
 
         status_container.info(f"Loading configuration for {job.csv_path.name}...")
 
@@ -81,14 +125,12 @@ def process_next_job():
         def on_progress(event_type: str, data: dict):
             if event_type == 'image_processed':
                 st.session_state.progress_current += 1
-                # Update progress bar
                 if st.session_state.progress_total > 0:
                     progress = st.session_state.progress_current / st.session_state.progress_total
                     progress_container.progress(progress)
                     progress_text.text(f"Processing: {st.session_state.progress_current}/{st.session_state.progress_total} images")
             elif event_type == 'image_skipped':
                 st.session_state.progress_current += 1
-                # Update progress bar
                 if st.session_state.progress_total > 0:
                     progress = st.session_state.progress_current / st.session_state.progress_total
                     progress_container.progress(progress)
@@ -101,7 +143,6 @@ def process_next_job():
                 })
             elif event_type == 'image_failed':
                 st.session_state.progress_current += 1
-                # Update progress bar
                 if st.session_state.progress_total > 0:
                     progress = st.session_state.progress_current / st.session_state.progress_total
                     progress_container.progress(progress)
@@ -113,7 +154,6 @@ def process_next_job():
                     'timestamp': datetime.now()
                 })
             elif event_type == 'batch_complete':
-                # Update overall counts
                 pass
 
         # Status callback
@@ -121,7 +161,6 @@ def process_next_job():
             st.session_state.current_status = msg
             status_container.info(f"**{job.csv_path.name}:** {msg}")
 
-            # Extract total count from status message if available
             if "Processing" in msg and "images" in msg:
                 try:
                     import re
@@ -131,7 +170,7 @@ def process_next_job():
                         st.session_state.progress_current = 0
                         progress_container.progress(0.0)
                         progress_text.text(f"Processing: 0/{st.session_state.progress_total} images")
-                except:
+                except Exception:
                     pass
 
         # Process the file
@@ -152,12 +191,11 @@ def process_next_job():
             'output_files': results.output_files
         })
 
-        status_container.success(f"✓ Completed: {job.csv_path.name}")
+        status_container.success(f"Completed: {job.csv_path.name}")
         progress_container.progress(1.0)
         progress_text.text(f"Completed: {st.session_state.progress_total}/{st.session_state.progress_total} images")
 
     except Exception as e:
-        # Mark as failed
         queue.mark_failed(job, str(e))
         st.session_state.error_log.append({
             'job': job.csv_path.name,
@@ -165,10 +203,9 @@ def process_next_job():
             'error': str(e),
             'timestamp': datetime.now()
         })
-        status_container.error(f"❌ Failed: {job.csv_path.name} - {str(e)}")
+        status_container.error(f"Failed: {job.csv_path.name} - {str(e)}")
 
     finally:
-        # Cleanup processed files
         queue.cleanup_completed_jobs()
         st.session_state.processing = False
 
@@ -185,19 +222,64 @@ def main():
     initialize_session_state()
 
     # Only scan for new files if we're not currently processing
-    # This prevents interrupting ongoing jobs
     if not st.session_state.processing:
         scan_for_new_files()
 
-    # Header
-    st.title("🖼️ Alt Text Generator")
-    st.markdown("Upload CSV files to generate contextual alt text using Claude Vision API")
+    # --- Sidebar: Settings ---
+    with st.sidebar:
+        st.header("Settings")
 
-    # File upload section
-    st.header("📁 Upload Files")
+        # API key status
+        api_key_ok = check_api_key()
+        if api_key_ok:
+            st.success("API key configured", icon="\u2705")
+        else:
+            st.error("API key missing or invalid", icon="\u26a0\ufe0f")
+            st.caption("Set `ANTHROPIC_API_KEY` in your `.env` file.")
 
+        st.divider()
+
+        # Instructions
+        st.subheader("Instructions")
+        st.caption("Override YAML config instructions. Leave blank to use YAML or defaults.")
+        st.text_area(
+            "Custom instructions for alt text generation",
+            key='sidebar_instructions',
+            height=150,
+            placeholder="e.g., Keep alt text under 125 characters.\nFocus on describing people and actions.",
+            label_visibility="collapsed"
+        )
+
+        st.divider()
+
+        # Processing options
+        st.subheader("Processing Options")
+        st.number_input(
+            "Max cost (USD)",
+            min_value=0.0,
+            value=0.0,
+            step=1.0,
+            format="%.2f",
+            key='sidebar_max_cost',
+            help="Stop processing if estimated cost exceeds this. 0 = no limit."
+        )
+        st.number_input(
+            "Scrape delay (seconds)",
+            min_value=0.0,
+            value=0.0,
+            step=0.5,
+            format="%.1f",
+            key='sidebar_scrape_delay',
+            help="Delay between scraping pages to avoid 403 errors. 0 = no delay."
+        )
+
+    # --- Main content ---
+    st.title("Alt Text Generator")
+    st.caption("Upload CSV files to generate contextual alt text using Claude Vision API")
+
+    # File upload (no duplicate label paragraph)
     uploaded_files = st.file_uploader(
-        "Drag and drop CSV files here (optional YAML files with same name for config)",
+        "Upload CSV and optional YAML config files",
         type=['csv', 'yaml'],
         accept_multiple_files=True,
         key='file_uploader'
@@ -209,40 +291,62 @@ def main():
             with open(file_path, 'wb') as f:
                 f.write(uploaded_file.getbuffer())
 
-        st.success(f"✓ Uploaded {len(uploaded_files)} file(s) to watched folder")
-        # Scan for the newly uploaded files
+        st.success(f"Uploaded {len(uploaded_files)} file(s)")
         scan_for_new_files()
         time.sleep(1)
         st.rerun()
 
-    # Queue status
-    st.header("📊 Processing Queue")
-
+    # --- Queue and processing ---
     queue = st.session_state.queue
     status = queue.get_queue_status()
+    jobs = queue.get_all_jobs()
 
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Total Jobs", status['total_jobs'])
-    col2.metric("Queued", status['queued'])
-    col3.metric("Processing", status['processing'])
-    col4.metric("Completed", status['completed'])
-    col5.metric("Failed", status['failed'])
+    # Only show queue metrics when there's something to show
+    has_any_jobs = status['total_jobs'] > 0
 
-    # Process next job if not currently processing
+    if has_any_jobs:
+        st.divider()
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Queued", status['queued'])
+        col2.metric("Completed", status['completed'])
+        col3.metric("Failed", status['failed'])
+
+    # --- Cost estimate + confirmation for queued jobs ---
     current_job = queue.get_current_job()
 
-    # Only start processing if we're not already processing
-    if not st.session_state.processing:
-        if not current_job:
-            # Check for next job
-            next_job = queue.get_next_job()
-            if next_job:
+    if not st.session_state.processing and not current_job:
+        next_job = queue.get_next_job()
+        if next_job:
+            job_key = str(next_job.csv_path)
+
+            if job_key not in st.session_state.confirmed_jobs:
+                # Show cost estimate and ask for confirmation
+                st.divider()
+                st.subheader("Ready to Process")
+
+                num_images, est_cost = estimate_job_cost(next_job.csv_path)
+
+                col1, col2, col3 = st.columns(3)
+                col1.metric("File", next_job.csv_path.name)
+                col2.metric("Images to Process", num_images)
+                col3.metric("Estimated Cost", f"${est_cost:.4f}")
+
+                if not api_key_ok:
+                    st.warning("Cannot start processing: API key is not configured. Check the sidebar.")
+                elif num_images == 0:
+                    st.info("No images need processing in this file. All rows already have alt text.")
+                else:
+                    if st.button("Start Processing", type="primary", use_container_width=True):
+                        st.session_state.confirmed_jobs.add(job_key)
+                        st.rerun()
+            else:
+                # Job confirmed, start processing
                 process_next_job()
-                # Don't call st.rerun() here - let the auto-refresh handle it
 
     # Current processing job
     if current_job:
-        st.subheader("⚙️ Currently Processing")
+        st.divider()
+        st.subheader("Currently Processing")
 
         with st.container():
             st.info(f"**File:** {current_job.csv_path.name}")
@@ -254,44 +358,41 @@ def main():
                 elapsed = (datetime.now() - current_job.started_at).total_seconds()
                 st.write(f"**Elapsed Time:** {elapsed:.1f}s")
 
-    # Error and skipped logs
-    col1, col2 = st.columns(2)
+    # --- Errors and Skipped (only shown when there's data) ---
+    has_errors = bool(st.session_state.error_log)
+    has_skipped = bool(st.session_state.skipped_log)
 
-    with col1:
-        st.subheader("⚠️ Errors")
+    if has_errors or has_skipped:
+        st.divider()
+        col1, col2 = st.columns(2)
 
-        if st.session_state.error_log:
-            # Show last 10 errors
-            recent_errors = st.session_state.error_log[-10:]
+        with col1:
+            if has_errors:
+                st.subheader(f"Errors ({len(st.session_state.error_log)})")
+                recent_errors = st.session_state.error_log[-10:]
+                for error in reversed(recent_errors):
+                    url_display = error['url'][:50] + '...' if len(error['url']) > 50 else error['url']
+                    with st.expander(f"{error['job']} - {url_display}"):
+                        st.error(f"**Error:** {error['error']}")
+                        st.caption(f"Time: {error['timestamp'].strftime('%H:%M:%S')}")
 
-            for error in reversed(recent_errors):
-                with st.expander(f"{error['job']} - {error['url'][:50]}..."):
-                    st.error(f"**Error:** {error['error']}")
-                    st.caption(f"Time: {error['timestamp'].strftime('%H:%M:%S')}")
-        else:
-            st.success("No errors")
+        with col2:
+            if has_skipped:
+                st.subheader(f"Skipped Images ({len(st.session_state.skipped_log)})")
+                recent_skipped = st.session_state.skipped_log[-10:]
+                for skipped in reversed(recent_skipped):
+                    url_display = skipped['url'][:50] + '...' if len(skipped['url']) > 50 else skipped['url']
+                    with st.expander(f"{skipped['job']} - {url_display}"):
+                        st.warning(f"**Reason:** {skipped['reason']}")
+                        st.caption(f"Time: {skipped['timestamp'].strftime('%H:%M:%S')}")
 
-    with col2:
-        st.subheader("⏭️ Skipped Images")
-
-        if st.session_state.skipped_log:
-            # Show last 10 skipped
-            recent_skipped = st.session_state.skipped_log[-10:]
-
-            for skipped in reversed(recent_skipped):
-                with st.expander(f"{skipped['job']} - {skipped['url'][:50]}..."):
-                    st.warning(f"**Reason:** {skipped['reason']}")
-                    st.caption(f"Time: {skipped['timestamp'].strftime('%H:%M:%S')}")
-        else:
-            st.success("No skipped images")
-
-    # Completed jobs
-    st.header("✅ Completed Jobs")
-
-    jobs = queue.get_all_jobs()
+    # --- Completed jobs (only shown when there's data) ---
     completed_jobs = [j for j in jobs if j.status == ProcessingStatus.COMPLETED]
 
     if completed_jobs:
+        st.divider()
+        st.subheader("Completed Jobs")
+
         for job in reversed(completed_jobs):
             with st.expander(f"{job.csv_path.name} - Completed at {job.completed_at.strftime('%H:%M:%S')}"):
                 col1, col2, col3, col4 = st.columns(4)
@@ -303,26 +404,23 @@ def main():
                 st.write("**Output Files:**")
                 for output_file in job.output_files:
                     if output_file.exists():
-                        # Read file content for download
                         with open(output_file, 'rb') as f:
                             file_data = f.read()
 
-                        # Create download button
                         st.download_button(
-                            label=f"📥 Download {output_file.name}",
+                            label=f"Download {output_file.name}",
                             data=file_data,
                             file_name=output_file.name,
                             mime='text/csv',
                             key=f"download_{job.csv_path.name}_{output_file.name}"
                         )
-    else:
-        st.info("No completed jobs yet")
 
-    # Failed jobs
+    # --- Failed jobs (only shown when there's data) ---
     failed_jobs = [j for j in jobs if j.status == ProcessingStatus.FAILED]
 
     if failed_jobs:
-        st.header("❌ Failed Jobs")
+        st.divider()
+        st.subheader("Failed Jobs")
 
         for job in reversed(failed_jobs):
             with st.expander(f"{job.csv_path.name} - Failed"):
@@ -331,7 +429,7 @@ def main():
                     duration = (job.completed_at - job.started_at).total_seconds()
                     st.write(f"**Duration:** {duration:.1f}s")
 
-    # Auto-refresh if processing or if there are queued jobs
+    # Auto-refresh if processing or if there are confirmed queued jobs
     if st.session_state.processing or status['queued'] > 0:
         time.sleep(2)
         st.rerun()
